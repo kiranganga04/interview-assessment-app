@@ -10,12 +10,6 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
-        # candidates.current_role collides with H2's built-in CURRENT_ROLE keyword (an ANSI SQL
-        # session function), which fails DDL generation with "expected identifier" and then
-        # cascades into every other table failing to create (interviews' FK to candidates,
-        # etc.). Quoting every identifier sidesteps the collision without touching the real
-        # MySQL schema/column names, which don't have this reserved-word problem.
-        globally_quoted_identifiers: true
 
 app:
   cors:

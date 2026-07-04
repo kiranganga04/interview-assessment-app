@@ -1,34 +1,29 @@
 package com.interview.assessment.service;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Service;
-
 /**
- * Default NotificationService: logs instead of sending real email/SMS, so the app runs
- * out of the box without SMTP credentials configured. Active whenever app.mail.enabled is
- * false or unset. Set app.mail.enabled=true (plus MAIL_USERNAME/MAIL_PASSWORD) to switch to
- * EmailNotificationService instead, which sends real emails via Spring Mail.
+ * SUPERSEDED / INACTIVE — kept only as a placeholder because this environment cannot delete
+ * files on your machine (only overwrite them). This class is deliberately NOT a Spring bean:
+ * no @Service, no @ConditionalOnProperty, and it no longer implements NotificationService.
+ *
+ * Previously this and EmailNotificationService were two competing @ConditionalOnProperty-gated
+ * NotificationService beans (one active when app.mail.enabled=false, the other when it was
+ * true). In a real run that produced:
+ *   "No qualifying bean of type 'NotificationService' available"
+ * i.e. NEITHER conditional matched, most likely an interaction between
+ * @ConditionalOnProperty's bean-skip evaluation and the extra property source loaded via
+ * spring.config.import (backend/application-local.yml) -- the condition is evaluated before
+ * that imported file's properties are guaranteed to be visible to it.
+ *
+ * The fix was to delete this class's role entirely and collapse to a single, always-registered
+ * NotificationService bean: see EmailNotificationService, which now reads app.mail.enabled via
+ * a plain @Value boolean and decides at runtime (inside its dispatch() method) whether to send
+ * a real email via JavaMailSender or just log it. That removes the "zero qualifying beans"
+ * failure mode completely, since there is always exactly one NotificationService bean.
+ *
+ * You can safely delete this file from disk; it is inert and referenced by nothing.
  */
-@Slf4j
-@Service
-@ConditionalOnProperty(prefix = "app.mail", name = "enabled", havingValue = "false", matchIfMissing = true)
-public class LoggingNotificationService implements NotificationService {
+final class LoggingNotificationService {
 
-    @Override
-    public void interviewScheduled(String recipientEmail, String candidateName, String scheduledAt) {
-        log.info("[notification] Interview scheduled for candidate '{}' at {} — would notify {}",
-                candidateName, scheduledAt, recipientEmail);
-    }
-
-    @Override
-    public void interviewStatusChanged(String recipientEmail, String candidateName, String newStatus) {
-        log.info("[notification] Interview for candidate '{}' moved to status {} — would notify {}",
-                candidateName, newStatus, recipientEmail);
-    }
-
-    @Override
-    public void passwordResetRequested(String recipientEmail, String resetToken) {
-        log.info("[notification] Password reset requested for {} — reset link token: {}", recipientEmail, resetToken);
+    private LoggingNotificationService() {
     }
 }
