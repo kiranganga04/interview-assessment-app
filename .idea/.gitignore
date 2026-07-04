@@ -1,5 +1,20 @@
-# Default ignored files
-/shelf/
-/workspace.xml
-# Environment-dependent path to Maven home directory
-/mavenHomeManager.xml
+## Backend
+backend/target/
+backend/uploads/
+*.class
+*.jar
+
+## Frontend
+frontend/node_modules/
+frontend/dist/
+
+## OS / IDE
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+## IntelliJ's own compiler output (used when "Delegate IDE build/run actions
+## to Maven" is off) - separate from Maven's backend/target/ above.
+out/
+**/out/
