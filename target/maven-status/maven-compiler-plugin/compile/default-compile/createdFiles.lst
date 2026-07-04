@@ -1,0 +1,16 @@
+com\interview\assessment\dto\SignUpRequest$SignUpRequestBuilder.class
+com\interview\assessment\config\PasswordConfig.class
+com\interview\assessment\entity\AppUser.class
+com\interview\assessment\entity\UserSession$UserSessionBuilder.class
+com\interview\assessment\dto\SignInRequest.class
+com\interview\assessment\dto\AuthResponse.class
+com\interview\assessment\controller\AuthController.class
+com\interview\assessment\dto\AuthResponse$AuthResponseBuilder.class
+com\interview\assessment\entity\UserRole.class
+com\interview\assessment\entity\UserSession.class
+com\interview\assessment\dto\SignUpRequest.class
+com\interview\assessment\entity\AppUser$AppUserBuilder.class
+com\interview\assessment\repository\AppUserRepository.class
+com\interview\assessment\dto\SignInRequest$SignInRequestBuilder.class
+com\interview\assessment\repository\UserSessionRepository.class
+com\interview\assessment\service\AuthService.class
