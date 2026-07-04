@@ -36,6 +36,13 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!-- Password reset / interview notification emails (real SMTP delivery via JavaMailSender,
+             see EmailNotificationService and app.mail.* / spring.mail.* in application.yml). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <!-- Module 1: real request-time authentication/authorization (filter chain + @PreAuthorize),
              not just a token that nothing on the server checks. -->
         <dependency>

@@ -1,0 +1,13 @@
+# LOCAL-ONLY overrides — this file is in .gitignore and must NEVER be committed.
+# It supplies real SMTP credentials for the password-reset email feature without touching
+# the tracked application.yml or requiring environment variables / IntelliJ run-config edits.
+# Loaded automatically via `spring.config.import: optional:file:./application-local.yml`
+# in backend/src/main/resources/application.yml.
+spring:
+  mail:
+    username: javabykiran07@gmail.com
+    password: Rishaan@8767
+
+app:
+  mail:
+    enabled: true

@@ -2,6 +2,13 @@ server:
   port: 8080
 
 spring:
+  # Local-only credential overrides (SMTP username/password, etc.) live in
+  # backend/application-local.yml, which is NOT committed to git (see .gitignore) — this
+  # keeps real secrets out of the tracked config while still being loaded automatically,
+  # no environment variables or run-configuration changes needed. `optional:` means it's
+  # simply skipped if the file doesn't exist (e.g. on a machine that hasn't created one yet).
+  config:
+    import: optional:file:./application-local.yml
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/interview_assessment_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
     username: ${SPRING_DATASOURCE_USERNAME:root}
@@ -22,6 +29,26 @@ spring:
       max-file-size: 10MB
       max-request-size: 12MB
 
+  # Real SMTP delivery for password-reset emails (module 1). Disabled by default (app.mail.enabled:
+  # false below) so the app still boots with zero config; set APP_MAIL_ENABLED=true plus
+  # MAIL_USERNAME/MAIL_PASSWORD as environment variables (never commit real credentials here) to
+  # switch EmailNotificationService on in place of the console-logging stub.
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
 logging:
   level:
     com.interview.assessment: DEBUG
@@ -32,6 +59,11 @@ app:
   file-storage:
     directory: ${APP_FILE_STORAGE_DIR:uploads}
     max-size-bytes: 10485760
+  mail:
+    enabled: ${APP_MAIL_ENABLED:false}
+    from-name: ${APP_MAIL_FROM_NAME:Interview Assessment System}
+  frontend:
+    base-url: ${APP_FRONTEND_BASE_URL:http://localhost:5173}
 
 springdoc:
   swagger-ui:
