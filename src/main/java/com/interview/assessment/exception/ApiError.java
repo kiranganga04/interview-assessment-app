@@ -1,16 +1,25 @@
 package com.interview.assessment.exception;
 
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class ApiError {
-    private LocalDateTime timestamp;
+    private LocalDateTime timestamp = LocalDateTime.now();
     private int status;
     private String error;
     private String message;
     private String path;
-    private Map<String, String> fieldErrors;
+
+    public ApiError(int status, String error, String message, String path) {
+        this.status = status;
+        this.error = error;
+        this.message = message;
+        this.path = path;
+    }
 }

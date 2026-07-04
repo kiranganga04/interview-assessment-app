@@ -1,15 +1,16 @@
 package com.interview.assessment.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-@Entity
-@Table(name = "coding_rounds")
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
-@Builder
+@Entity
+@Table(name = "coding_rounds")
 public class CodingRound {
 
     @Id
@@ -17,6 +18,7 @@ public class CodingRound {
     @Column(name = "coding_round_id")
     private Long codingRoundId;
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "interview_id", nullable = false)
     private Interview interview;
@@ -31,11 +33,11 @@ public class CodingRound {
     private Integer timeTakenMins;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "test_complexity")
+    @Column(name = "test_complexity", length = 20)
     private TestComplexity testComplexity;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "coding_status")
+    @Column(name = "coding_status", length = 20)
     private CodingStatus codingStatus;
 
     @Column(name = "remarks", columnDefinition = "TEXT")

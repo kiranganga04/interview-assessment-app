@@ -1,17 +1,21 @@
 package com.interview.assessment.entity;
 
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "user_sessions")
+/**
+ * Module 1 (security): opaque bearer tokens are persisted here so the backend can validate,
+ * expire, and revoke them on logout instead of trusting whatever the client sends.
+ */
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
-@Builder
+@Entity
+@Table(name = "user_sessions")
 public class UserSession {
 
     @Id
@@ -19,9 +23,8 @@ public class UserSession {
     @Column(name = "session_id")
     private Long sessionId;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
-    private AppUser user;
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
 
     @Column(name = "auth_token", nullable = false, unique = true, length = 80)
     private String authToken;
@@ -29,6 +32,6 @@ public class UserSession {
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
 
-    @Column(name = "created_at", updatable = false, insertable = false)
-    private LocalDateTime createdAt;
+    @Column(name = "created_at")
+    private LocalDateTime createdAt = LocalDateTime.now();
 }

@@ -1,14 +1,14 @@
 package com.interview.assessment.dto;
 
-import lombok.*;
+import lombok.Data;
 
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Data
 public class CodingRoundDTO {
     private Long codingRoundId;
     private String skill;
     private Integer noOfQuestions;
     private Integer timeTakenMins;
-    private String testComplexity;  // LOW | MEDIUM | HIGH
-    private String codingStatus;    // COMPLETED | NOT_COMPLETED
+    private String testComplexity;
+    private String codingStatus;
     private String remarks;
 }

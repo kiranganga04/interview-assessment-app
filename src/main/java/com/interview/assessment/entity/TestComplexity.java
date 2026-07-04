@@ -1,5 +1,7 @@
 package com.interview.assessment.entity;
 
 public enum TestComplexity {
-    LOW, MEDIUM, HIGH
+    LOW,
+    MEDIUM,
+    HIGH
 }

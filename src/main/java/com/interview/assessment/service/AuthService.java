@@ -1,85 +1,121 @@
 package com.interview.assessment.service;
 
-import com.interview.assessment.dto.AuthResponse;
-import com.interview.assessment.dto.SignInRequest;
-import com.interview.assessment.dto.SignUpRequest;
+import com.interview.assessment.dto.*;
 import com.interview.assessment.entity.AppUser;
+import com.interview.assessment.entity.PasswordResetToken;
 import com.interview.assessment.entity.UserRole;
 import com.interview.assessment.entity.UserSession;
+import com.interview.assessment.exception.BadRequestException;
+import com.interview.assessment.exception.ResourceNotFoundException;
 import com.interview.assessment.repository.AppUserRepository;
+import com.interview.assessment.repository.PasswordResetTokenRepository;
 import com.interview.assessment.repository.UserSessionRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.UUID;
+import java.util.Base64;
 
 @Service
 @RequiredArgsConstructor
-@Transactional
 public class AuthService {
 
-    private static final int SESSION_DAYS = 7;
+    private static final long SESSION_TTL_HOURS = 12;
+    private static final long RESET_TOKEN_TTL_MINUTES = 30;
 
     private final AppUserRepository appUserRepository;
     private final UserSessionRepository userSessionRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final PasswordEncoder passwordEncoder;
+    private final NotificationService notificationService;
+    private final SecureRandom secureRandom = new SecureRandom();
 
+    @Transactional
     public AuthResponse signUp(SignUpRequest request) {
-        String normalizedEmail = normalizeEmail(request.getEmail());
-        if (appUserRepository.existsByEmailIgnoreCase(normalizedEmail)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "An account already exists for this email.");
+        if (appUserRepository.existsByEmailIgnoreCase(request.getEmail())) {
+            throw new BadRequestException("An account with this email already exists.");
         }
-
-        AppUser user = AppUser.builder()
-                .fullName(request.getFullName().trim())
-                .email(normalizedEmail)
-                .passwordHash(passwordEncoder.encode(request.getPassword()))
-                .role(UserRole.RECRUITER)
-                .active(true)
-                .build();
-
-        return createSession(appUserRepository.save(user));
+        AppUser user = new AppUser();
+        user.setFullName(request.getFullName());
+        user.setEmail(request.getEmail().toLowerCase());
+        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        // First user in the system becomes ADMIN so there's always someone who can manage the rest.
+        user.setRole(appUserRepository.count() == 0 ? UserRole.ADMIN : UserRole.RECRUITER);
+        user = appUserRepository.save(user);
+        return issueSession(user);
     }
 
+    @Transactional
     public AuthResponse signIn(SignInRequest request) {
-        AppUser user = appUserRepository.findByEmailIgnoreCase(normalizeEmail(request.getEmail()))
-                .orElseThrow(() -> invalidCredentials());
+        AppUser user = appUserRepository.findByEmailIgnoreCase(request.getEmail())
+                .orElseThrow(() -> new BadCredentialsException("Invalid email or password."));
 
-        if (!user.isActive() || !passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            throw invalidCredentials();
+        if (!user.isActive()) {
+            throw new BadCredentialsException("This account has been deactivated.");
         }
-
-        return createSession(user);
+        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            throw new BadCredentialsException("Invalid email or password.");
+        }
+        return issueSession(user);
     }
 
-    private AuthResponse createSession(AppUser user) {
-        LocalDateTime expiresAt = LocalDateTime.now().plusDays(SESSION_DAYS);
-        UserSession session = userSessionRepository.save(UserSession.builder()
-                .user(user)
-                .authToken(UUID.randomUUID().toString())
-                .expiresAt(expiresAt)
-                .build());
-
-        return AuthResponse.builder()
-                .userId(user.getUserId())
-                .fullName(user.getFullName())
-                .email(user.getEmail())
-                .role(user.getRole())
-                .token(session.getAuthToken())
-                .expiresAt(expiresAt)
-                .build();
+    @Transactional
+    public void signOut(String token) {
+        userSessionRepository.deleteByAuthToken(token);
     }
 
-    private String normalizeEmail(String email) {
-        return email == null ? "" : email.trim().toLowerCase();
+    @Transactional
+    public void requestPasswordReset(String email) {
+        appUserRepository.findByEmailIgnoreCase(email).ifPresent(user -> {
+            PasswordResetToken token = new PasswordResetToken();
+            token.setUserId(user.getUserId());
+            token.setToken(randomToken());
+            token.setExpiresAt(LocalDateTime.now().plusMinutes(RESET_TOKEN_TTL_MINUTES));
+            passwordResetTokenRepository.save(token);
+            notificationService.passwordResetRequested(user.getEmail(), token.getToken());
+        });
+        // Deliberately no error when the email doesn't exist, so this endpoint can't be used to enumerate accounts.
     }
 
-    private ResponseStatusException invalidCredentials() {
-        return new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password.");
+    @Transactional
+    public void confirmPasswordReset(String rawToken, String newPassword) {
+        PasswordResetToken token = passwordResetTokenRepository.findByToken(rawToken)
+                .orElseThrow(() -> new BadRequestException("Invalid or expired reset token."));
+        if (token.isUsed() || token.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new BadRequestException("Invalid or expired reset token.");
+        }
+        AppUser user = appUserRepository.findById(token.getUserId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        appUserRepository.save(user);
+        token.setUsed(true);
+        passwordResetTokenRepository.save(token);
+        userSessionRepository.deleteByUserId(user.getUserId());
+    }
+
+    private AuthResponse issueSession(AppUser user) {
+        UserSession session = new UserSession();
+        session.setUserId(user.getUserId());
+        session.setAuthToken(randomToken());
+        session.setExpiresAt(LocalDateTime.now().plusHours(SESSION_TTL_HOURS));
+        session = userSessionRepository.save(session);
+
+        return new AuthResponse(
+                session.getAuthToken(),
+                user.getUserId(),
+                user.getFullName(),
+                user.getEmail(),
+                user.getRole().name(),
+                session.getExpiresAt());
+    }
+
+    private String randomToken() {
+        byte[] bytes = new byte[48];
+        secureRandom.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 }

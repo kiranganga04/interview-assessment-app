@@ -4,8 +4,8 @@ import com.interview.assessment.dto.CandidateDTO;
 import com.interview.assessment.service.CandidateService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -18,29 +18,28 @@ public class CandidateController {
     private final CandidateService candidateService;
 
     @GetMapping
-    public ResponseEntity<List<CandidateDTO>> getAll(
-            @RequestParam(required = false) String name) {
-        if (name != null && !name.isBlank()) {
-            return ResponseEntity.ok(candidateService.search(name));
-        }
-        return ResponseEntity.ok(candidateService.getAll());
+    public List<CandidateDTO> list(@RequestParam(required = false) String name) {
+        return candidateService.search(name);
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<CandidateDTO> getById(@PathVariable Long id) {
-        return ResponseEntity.ok(candidateService.getById(id));
+    public CandidateDTO get(@PathVariable Long id) {
+        return candidateService.get(id);
     }
 
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
     @PostMapping
-    public ResponseEntity<CandidateDTO> create(@Valid @RequestBody CandidateDTO dto) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(candidateService.create(dto));
+    public CandidateDTO create(@Valid @RequestBody CandidateDTO dto) {
+        return candidateService.create(dto);
     }
 
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
     @PutMapping("/{id}")
-    public ResponseEntity<CandidateDTO> update(@PathVariable Long id, @Valid @RequestBody CandidateDTO dto) {
-        return ResponseEntity.ok(candidateService.update(id, dto));
+    public CandidateDTO update(@PathVariable Long id, @Valid @RequestBody CandidateDTO dto) {
+        return candidateService.update(id, dto);
     }
 
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         candidateService.delete(id);

@@ -1,20 +1,16 @@
 package com.interview.assessment.entity;
 
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-
-@Entity
-@Table(name = "candidates")
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class Candidate {
+@Entity
+@Table(name = "candidates")
+public class Candidate extends AuditableEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -32,14 +28,4 @@ public class Candidate {
 
     @Column(name = "current_role", length = 150)
     private String currentRole;
-
-    @Column(name = "created_at", updatable = false, insertable = false)
-    private LocalDateTime createdAt;
-
-    @Column(name = "updated_at", insertable = false)
-    private LocalDateTime updatedAt;
-
-    @Builder.Default
-    @OneToMany(mappedBy = "candidate", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Interview> interviews = new ArrayList<>();
 }

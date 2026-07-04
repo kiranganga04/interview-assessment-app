@@ -2,14 +2,13 @@ package com.interview.assessment.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import lombok.*;
+import lombok.Data;
 
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Data
 public class SignInRequest {
-    @Email(message = "Email must be valid")
-    @NotBlank(message = "Email is mandatory")
+    @NotBlank @Email
     private String email;
 
-    @NotBlank(message = "Password is mandatory")
+    @NotBlank
     private String password;
 }

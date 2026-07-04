@@ -1,57 +1,42 @@
 package com.interview.assessment.dto;
 
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
-import lombok.*;
+import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Aggregate DTO representing one full "Interview Assessment Form" submission:
- * candidate + interview meta + internal panel skills + client panel skills + coding round(s).
- */
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Data
 public class InterviewDTO {
-
     private Long interviewId;
 
-    @NotNull(message = "candidateId is mandatory")
     private Long candidateId;
-
-    // convenience read-only fields, populated on responses
+    // read-only convenience fields, populated on the way out so list/detail views
+    // don't need a second round trip to fetch the candidate
     private String candidateName;
-    private String mobileNumber;
-    private String overallExperience;
     private String currentRole;
+    private String overallExperience;
 
     private String panelMemberName;
     private String recruiterName;
-    private String levelOfInterview;   // L1 | L2 | L3 | HR | CLIENT
-    private String modeOfInterview;    // VIRTUAL | IN_PERSON | TELEPHONIC
+    private String levelOfInterview;
+    private String modeOfInterview;
     private LocalDate interviewDate;
-
     private String domainKnowledge;
     private String domainFeedback;
-
     private BigDecimal communicationRating;
     private BigDecimal finalRating;
-
     private String overallAssessment;
     private String panelRecommendation;
     private String interviewScreenshotUrl;
 
-    @Valid
-    @Builder.Default
+    /** Module 3: workflow. Defaults are applied server-side if the client omits them. */
+    private String status;
+    private LocalDateTime scheduledAt;
+
     private List<SkillAssessmentDTO> internalSkillAssessments = new ArrayList<>();
-
-    @Valid
-    @Builder.Default
     private List<SkillAssessmentDTO> clientSkillAssessments = new ArrayList<>();
-
-    @Valid
-    @Builder.Default
     private List<CodingRoundDTO> codingRounds = new ArrayList<>();
 }

@@ -1,16 +1,19 @@
 package com.interview.assessment.dto;
 
-import com.interview.assessment.entity.UserRole;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class AuthResponse {
+    private String token;
     private Long userId;
     private String fullName;
     private String email;
-    private UserRole role;
-    private String token;
+    private String role;
     private LocalDateTime expiresAt;
 }

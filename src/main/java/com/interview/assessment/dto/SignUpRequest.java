@@ -3,18 +3,16 @@ package com.interview.assessment.dto;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
-import lombok.*;
+import lombok.Data;
 
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Data
 public class SignUpRequest {
-    @NotBlank(message = "Full name is mandatory")
+    @NotBlank
     private String fullName;
 
-    @Email(message = "Email must be valid")
-    @NotBlank(message = "Email is mandatory")
+    @NotBlank @Email
     private String email;
 
-    @Size(min = 8, message = "Password must be at least 8 characters")
-    @NotBlank(message = "Password is mandatory")
+    @NotBlank @Size(min = 8, message = "Password must be at least 8 characters")
     private String password;
 }

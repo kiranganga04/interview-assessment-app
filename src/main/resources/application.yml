@@ -17,6 +17,10 @@ spring:
         dialect: org.hibernate.dialect.MySQLDialect
   jackson:
     default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
 
 logging:
   level:
@@ -25,3 +29,18 @@ logging:
 app:
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+  file-storage:
+    directory: ${APP_FILE_STORAGE_DIR:uploads}
+    max-size-bytes: 10485760
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
