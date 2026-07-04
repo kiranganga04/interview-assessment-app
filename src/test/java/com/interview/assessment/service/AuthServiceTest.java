@@ -10,7 +10,6 @@ import com.interview.assessment.exception.BadRequestException;
 import com.interview.assessment.repository.AppUserRepository;
 import com.interview.assessment.repository.PasswordResetTokenRepository;
 import com.interview.assessment.repository.UserSessionRepository;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -47,8 +46,16 @@ class AuthServiceTest {
     @InjectMocks
     private AuthService authService;
 
-    @BeforeEach
-    void setUp() {
+    /**
+     * Stubs a UserSession save that returns a persisted-looking session. Only the two
+     * successful-signup tests below ever reach session issuance -- the rejection tests throw
+     * before getting there -- so this is called explicitly from just those two tests instead
+     * of living in a shared @BeforeEach. Mockito's strict stubs (the default with
+     * MockitoExtension) fail a test if a stub set up for it is never invoked during that test,
+     * which is exactly what was happening: the three rejection tests were inheriting a stub
+     * they never used, and Mockito correctly flagged it as dead test setup.
+     */
+    private void stubSessionSave() {
         when(userSessionRepository.save(any(UserSession.class))).thenAnswer(invocation -> {
             UserSession session = invocation.getArgument(0);
             session.setSessionId(1L);
@@ -58,6 +65,8 @@ class AuthServiceTest {
 
     @Test
     void firstUserToSignUpBecomesAdmin() {
+        stubSessionSave();
+
         SignUpRequest request = new SignUpRequest();
         request.setFullName("Kiran");
         request.setEmail("kiran@example.com");
@@ -80,6 +89,8 @@ class AuthServiceTest {
 
     @Test
     void secondUserToSignUpBecomesRecruiter() {
+        stubSessionSave();
+
         SignUpRequest request = new SignUpRequest();
         request.setFullName("Second User");
         request.setEmail("second@example.com");
