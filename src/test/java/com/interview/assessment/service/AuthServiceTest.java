@@ -88,7 +88,7 @@ class AuthServiceTest {
     }
 
     @Test
-    void secondUserToSignUpBecomesRecruiter() {
+    void secondUserToSignUpBecomesPanel() {
         stubSessionSave();
 
         SignUpRequest request = new SignUpRequest();
@@ -107,7 +107,7 @@ class AuthServiceTest {
 
         AuthResponse response = authService.signUp(request);
 
-        assertThat(response.getRole()).isEqualTo(UserRole.RECRUITER.name());
+        assertThat(response.getRole()).isEqualTo(UserRole.PANEL.name());
     }
 
     @Test

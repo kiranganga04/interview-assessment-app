@@ -44,7 +44,10 @@ public class AuthService {
         user.setEmail(request.getEmail().toLowerCase());
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         // First user in the system becomes ADMIN so there's always someone who can manage the rest.
-        user.setRole(appUserRepository.count() == 0 ? UserRole.ADMIN : UserRole.RECRUITER);
+        // Every subsequent self-registered user defaults to PANEL (the least-privileged role) --
+        // only an authenticated ADMIN can grant RECRUITER/ADMIN access, via UserService.createUser
+        // or updateRole, both gated by @PreAuthorize("hasRole('ADMIN')") on UserController.
+        user.setRole(appUserRepository.count() == 0 ? UserRole.ADMIN : UserRole.PANEL);
         user = appUserRepository.save(user);
         return issueSession(user);
     }

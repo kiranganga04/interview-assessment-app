@@ -20,7 +20,12 @@ public class InterviewController {
 
     private final InterviewService interviewService;
 
-    /** Module 8: page/size/sort + level/status/search filters, all optional for backwards compatibility. */
+    /**
+     * Module 8: page/size/sort + level/status/search filters, all optional for backwards compatibility.
+     * PANEL intentionally excluded: panel members submit/manage their own assessments (create + view a
+     * specific record by id) but don't get to browse the full assessments list.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
     @GetMapping
     public PageResponse<InterviewDTO> list(
             @RequestParam(required = false) String level,
