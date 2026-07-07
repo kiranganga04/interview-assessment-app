@@ -34,6 +34,19 @@ public class Interview extends AuditableEntity {
     @Column(name = "recruiter_name", length = 150)
     private String recruiterName;
 
+    /** Nullable: only set when this interview was created via the Schedule Interview / slot-booking flow. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "interviewer_id")
+    private Interviewer interviewer;
+
+    /** Nullable for the same reason as interviewer above. Released back to AVAILABLE on cancel/delete. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "slot_id")
+    private InterviewSlot slot;
+
+    @Column(name = "position", length = 150)
+    private String position;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "level_of_interview", length = 20)
     private InterviewLevel levelOfInterview = InterviewLevel.L1;

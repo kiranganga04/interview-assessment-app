@@ -2,6 +2,7 @@ package com.interview.assessment.controller;
 
 import com.interview.assessment.dto.InterviewDTO;
 import com.interview.assessment.dto.PageResponse;
+import com.interview.assessment.dto.ScheduleInterviewRequest;
 import com.interview.assessment.dto.StatusChangeRequest;
 import com.interview.assessment.service.InterviewService;
 import jakarta.validation.Valid;
@@ -9,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -44,6 +46,18 @@ public class InterviewController {
     @PostMapping
     public InterviewDTO create(@Valid @RequestBody InterviewDTO dto) {
         return interviewService.create(dto);
+    }
+
+    /**
+     * Interview Management: the Schedule Interview wizard books an available slot instead of
+     * free-typing panel/date/time. ADMIN/RECRUITER only -- resourcing interviews against slots
+     * is a scheduling concern, same scope as InterviewerController/InterviewSlotController.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
+    @PostMapping("/schedule")
+    @ResponseStatus(HttpStatus.CREATED)
+    public InterviewDTO schedule(@Valid @RequestBody ScheduleInterviewRequest request) {
+        return interviewService.scheduleFromSlot(request);
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','RECRUITER','PANEL')")

@@ -9,5 +9,7 @@ public enum InterviewStatus {
     IN_PROGRESS,
     SUBMITTED,
     RECOMMENDED,
-    CLOSED
+    CLOSED,
+    /** Added alongside the Interview Slots scheduling module; releases the booked slot back to AVAILABLE. */
+    CANCELLED
 }

@@ -4,15 +4,22 @@ import com.interview.assessment.dto.*;
 import com.interview.assessment.entity.Interview;
 import com.interview.assessment.entity.InterviewStatus;
 import com.interview.assessment.entity.PanelType;
+import com.interview.assessment.repository.CandidateRepository;
 import com.interview.assessment.repository.InterviewRepository;
+import com.interview.assessment.repository.InterviewerRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -25,16 +32,86 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReportService {
 
+    private static final DateTimeFormatter MONTH_KEY_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
+
     private final InterviewRepository interviewRepository;
+    private final CandidateRepository candidateRepository;
+    private final InterviewerRepository interviewerRepository;
 
     @Transactional(readOnly = true)
     public DashboardSummaryDTO dashboardSummary() {
         List<Interview> all = interviewRepository.findAll();
+        LocalDateTime now = LocalDateTime.now();
+
         long scheduled = all.stream().filter(i -> i.getStatus() == InterviewStatus.SCHEDULED).count();
         long submitted = all.stream().filter(i -> i.getStatus() == InterviewStatus.SUBMITTED).count();
         long recommended = all.stream().filter(i -> i.getStatus() == InterviewStatus.RECOMMENDED).count();
+        long closed = all.stream().filter(i -> i.getStatus() == InterviewStatus.CLOSED).count();
+        long cancelled = all.stream().filter(i -> i.getStatus() == InterviewStatus.CANCELLED).count();
+        long overdue = all.stream()
+                .filter(i -> i.getStatus() == InterviewStatus.SCHEDULED
+                        && i.getScheduledAt() != null && i.getScheduledAt().isBefore(now))
+                .count();
+        long today = all.stream()
+                .filter(i -> i.getScheduledAt() != null && i.getScheduledAt().toLocalDate().isEqual(now.toLocalDate()))
+                .count();
         double avgFinal = average(all.stream().map(Interview::getFinalRating));
-        return new DashboardSummaryDTO(all.size(), scheduled, submitted, recommended, avgFinal);
+
+        DashboardSummaryDTO dto = new DashboardSummaryDTO();
+        dto.setTotalInterviews(all.size());
+        dto.setScheduledCount(scheduled);
+        dto.setSubmittedCount(submitted);
+        dto.setRecommendedCount(recommended);
+        dto.setAverageFinalRating(avgFinal);
+        dto.setClosedCount(closed);
+        dto.setCancelledCount(cancelled);
+        dto.setCompletedCount(recommended + closed);
+        dto.setCandidateCount(candidateRepository.count());
+        dto.setInterviewerCount(interviewerRepository.count());
+        dto.setTodaysInterviewCount(today);
+        dto.setPendingFeedbackCount(submitted);
+        dto.setOverdueCount(overdue);
+        return dto;
+    }
+
+    /** Bar-chart data for the last `months` calendar months (oldest first), keyed by scheduled_at falling in that month. */
+    @Transactional(readOnly = true)
+    public List<MonthlyInterviewCountDTO> monthlyInterviews(int months) {
+        YearMonth current = YearMonth.from(LocalDate.now());
+        Map<YearMonth, Long> byMonth = new TreeMap<>();
+        for (int i = months - 1; i >= 0; i--) {
+            byMonth.put(current.minusMonths(i), 0L);
+        }
+        interviewRepository.findAll().stream()
+                .filter(i -> i.getScheduledAt() != null)
+                .map(i -> YearMonth.from(i.getScheduledAt()))
+                .filter(byMonth::containsKey)
+                .forEach(ym -> byMonth.merge(ym, 1L, Long::sum));
+
+        return byMonth.entrySet().stream()
+                .map(e -> new MonthlyInterviewCountDTO(e.getKey().format(MONTH_KEY_FORMAT), e.getValue()))
+                .toList();
+    }
+
+    /** Today's Agenda: interviews scheduled for today, earliest first. */
+    @Transactional(readOnly = true)
+    public List<AgendaItemDTO> todaysAgenda() {
+        LocalDate today = LocalDate.now();
+        return interviewRepository.findAll().stream()
+                .filter(i -> i.getScheduledAt() != null && i.getScheduledAt().toLocalDate().isEqual(today))
+                .sorted(Comparator.comparing(Interview::getScheduledAt))
+                .map(i -> {
+                    AgendaItemDTO item = new AgendaItemDTO();
+                    item.setInterviewId(i.getInterviewId());
+                    item.setCandidateName(i.getCandidate() != null ? i.getCandidate().getCandidateName() : null);
+                    item.setLevelOfInterview(i.getLevelOfInterview() != null ? i.getLevelOfInterview().name() : null);
+                    item.setStatus(i.getStatus() != null ? i.getStatus().name() : null);
+                    item.setScheduledAt(i.getScheduledAt());
+                    item.setInterviewerOrPanelName(i.getInterviewer() != null ? i.getInterviewer().getFullName() : i.getPanelMemberName());
+                    item.setModeOfInterview(i.getModeOfInterview() != null ? i.getModeOfInterview().name() : null);
+                    return item;
+                })
+                .toList();
     }
 
     @Transactional(readOnly = true)

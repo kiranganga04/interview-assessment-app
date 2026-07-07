@@ -21,6 +21,14 @@ public class InterviewDTO {
 
     private String panelMemberName;
     private String recruiterName;
+
+    // Only populated for interviews created via the Schedule Interview / slot-booking flow.
+    private Long interviewerId;
+    private String interviewerName;
+    private Long slotId;
+    private String slotCode;
+    private String position;
+
     private String levelOfInterview;
     private String modeOfInterview;
     private LocalDate interviewDate;

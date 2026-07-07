@@ -6,6 +6,8 @@ import com.interview.assessment.exception.BadRequestException;
 import com.interview.assessment.exception.ResourceNotFoundException;
 import com.interview.assessment.repository.CandidateRepository;
 import com.interview.assessment.repository.InterviewRepository;
+import com.interview.assessment.repository.InterviewSlotRepository;
+import com.interview.assessment.repository.InterviewerRepository;
 import com.interview.assessment.repository.SkillRepository;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
@@ -31,16 +33,19 @@ public class InterviewService {
     private static final Map<InterviewStatus, Set<InterviewStatus>> ALLOWED_TRANSITIONS = new EnumMap<>(InterviewStatus.class);
 
     static {
-        ALLOWED_TRANSITIONS.put(InterviewStatus.SCHEDULED, Set.of(InterviewStatus.IN_PROGRESS, InterviewStatus.CLOSED));
-        ALLOWED_TRANSITIONS.put(InterviewStatus.IN_PROGRESS, Set.of(InterviewStatus.SUBMITTED, InterviewStatus.CLOSED));
+        ALLOWED_TRANSITIONS.put(InterviewStatus.SCHEDULED, Set.of(InterviewStatus.IN_PROGRESS, InterviewStatus.CLOSED, InterviewStatus.CANCELLED));
+        ALLOWED_TRANSITIONS.put(InterviewStatus.IN_PROGRESS, Set.of(InterviewStatus.SUBMITTED, InterviewStatus.CLOSED, InterviewStatus.CANCELLED));
         ALLOWED_TRANSITIONS.put(InterviewStatus.SUBMITTED, Set.of(InterviewStatus.RECOMMENDED, InterviewStatus.IN_PROGRESS, InterviewStatus.CLOSED));
         ALLOWED_TRANSITIONS.put(InterviewStatus.RECOMMENDED, Set.of(InterviewStatus.CLOSED));
         ALLOWED_TRANSITIONS.put(InterviewStatus.CLOSED, Set.of());
+        ALLOWED_TRANSITIONS.put(InterviewStatus.CANCELLED, Set.of());
     }
 
     private final InterviewRepository interviewRepository;
     private final CandidateRepository candidateRepository;
     private final SkillRepository skillRepository;
+    private final InterviewSlotRepository interviewSlotRepository;
+    private final InterviewerRepository interviewerRepository;
     private final AuditService auditService;
     private final NotificationService notificationService;
 
@@ -71,6 +76,45 @@ public class InterviewService {
         return toDto(interview);
     }
 
+    /**
+     * Interview Management: books an AVAILABLE slot (flips it to BOOKED) and creates a
+     * SCHEDULED interview from it -- interviewer, date/time and mode all come from the
+     * slot rather than being re-entered. This is additive to the plain create() above
+     * (still used by the "New assessment" form, including by PANEL); existing callers
+     * of create() are unaffected.
+     */
+    @Transactional
+    public InterviewDTO scheduleFromSlot(ScheduleInterviewRequest request) {
+        InterviewSlot slot = interviewSlotRepository.findById(request.getSlotId())
+                .orElseThrow(() -> new ResourceNotFoundException("Interview slot not found: " + request.getSlotId()));
+        if (slot.getStatus() != SlotStatus.AVAILABLE) {
+            throw new BadRequestException("This slot is no longer available -- please pick another.");
+        }
+
+        Interview interview = new Interview();
+        interview.setCandidate(findCandidate(request.getCandidateId()));
+        interview.setInterviewer(slot.getInterviewer());
+        interview.setSlot(slot);
+        interview.setPanelMemberName(slot.getInterviewer().getFullName());
+        interview.setRecruiterName(request.getRecruiterName());
+        interview.setPosition(request.getPosition());
+        interview.setLevelOfInterview(parseLevel(request.getLevelOfInterview()));
+        interview.setModeOfInterview(slot.getMode());
+        interview.setInterviewDate(slot.getSlotDate());
+        interview.setScheduledAt(slot.getSlotDate().atTime(slot.getStartTime()));
+        interview.setStatus(InterviewStatus.SCHEDULED);
+
+        slot.setStatus(SlotStatus.BOOKED);
+        interviewSlotRepository.save(slot);
+
+        interview = interviewRepository.save(interview);
+        auditService.record("Interview", interview.getInterviewId(), "SCHEDULE",
+                "slot=" + slot.getSlotCode() + " interviewer=" + slot.getInterviewer().getFullName());
+        notificationService.interviewScheduled(request.getRecruiterName(),
+                interview.getCandidate().getCandidateName(), interview.getScheduledAt().toString());
+        return toDto(interview);
+    }
+
     @Transactional
     public InterviewDTO update(Long id, InterviewDTO dto) {
         Interview interview = findOrThrow(id);
@@ -93,6 +137,9 @@ public class InterviewService {
                     "Cannot move an interview from " + interview.getStatus() + " to " + next + ".");
         }
         interview.setStatus(next);
+        if (next == InterviewStatus.CANCELLED) {
+            releaseSlotIfAny(interview);
+        }
         interview = interviewRepository.save(interview);
         auditService.record("Interview", interview.getInterviewId(), "STATUS_CHANGE", next.name());
         notificationService.interviewStatusChanged(interview.getRecruiterName(),
@@ -103,9 +150,19 @@ public class InterviewService {
     @Transactional
     public void delete(Long id) {
         Interview interview = findOrThrow(id);
+        releaseSlotIfAny(interview);
         auditService.record("Interview", interview.getInterviewId(), "DELETE",
                 "candidate=" + interview.getCandidate().getCandidateName());
         interviewRepository.delete(interview);
+    }
+
+    /** Frees up the booked slot (if any) so it can be booked again -- used on cancel and delete. */
+    private void releaseSlotIfAny(Interview interview) {
+        InterviewSlot slot = interview.getSlot();
+        if (slot != null && slot.getStatus() == SlotStatus.BOOKED) {
+            slot.setStatus(SlotStatus.AVAILABLE);
+            interviewSlotRepository.save(slot);
+        }
     }
 
     // ---------- internals ----------
@@ -138,6 +195,14 @@ public class InterviewService {
         }
     }
 
+    private InterviewLevel parseLevel(String raw) {
+        try {
+            return InterviewLevel.valueOf(raw.toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            throw new BadRequestException("Unknown interview level: " + raw);
+        }
+    }
+
     private Candidate findCandidate(Long candidateId) {
         if (candidateId == null) {
             throw new BadRequestException("candidateId is required.");
@@ -154,6 +219,7 @@ public class InterviewService {
     private void applyFields(Interview interview, InterviewDTO dto) {
         interview.setPanelMemberName(dto.getPanelMemberName());
         interview.setRecruiterName(dto.getRecruiterName());
+        interview.setPosition(dto.getPosition());
         if (StringUtils.hasText(dto.getLevelOfInterview())) {
             interview.setLevelOfInterview(InterviewLevel.valueOf(dto.getLevelOfInterview().toUpperCase()));
         }
@@ -234,6 +300,15 @@ public class InterviewService {
         dto.setOverallExperience(interview.getCandidate().getOverallExperience());
         dto.setPanelMemberName(interview.getPanelMemberName());
         dto.setRecruiterName(interview.getRecruiterName());
+        if (interview.getInterviewer() != null) {
+            dto.setInterviewerId(interview.getInterviewer().getInterviewerId());
+            dto.setInterviewerName(interview.getInterviewer().getFullName());
+        }
+        if (interview.getSlot() != null) {
+            dto.setSlotId(interview.getSlot().getSlotId());
+            dto.setSlotCode(interview.getSlot().getSlotCode());
+        }
+        dto.setPosition(interview.getPosition());
         dto.setLevelOfInterview(interview.getLevelOfInterview() != null ? interview.getLevelOfInterview().name() : null);
         dto.setModeOfInterview(interview.getModeOfInterview() != null ? interview.getModeOfInterview().name() : null);
         dto.setInterviewDate(interview.getInterviewDate());

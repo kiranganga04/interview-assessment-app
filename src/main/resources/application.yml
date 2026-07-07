@@ -55,7 +55,10 @@ logging:
 
 app:
   cors:
-    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+    # Vite auto-increments past 5173 if that port is already taken (e.g. a previous `npm run
+    # dev` still running) -- widened to cover that drift so a stray old process doesn't turn
+    # into a confusing CORS 403 on every request, including sign-in.
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://localhost:3000}
   file-storage:
     directory: ${APP_FILE_STORAGE_DIR:uploads}
     max-size-bytes: 10485760

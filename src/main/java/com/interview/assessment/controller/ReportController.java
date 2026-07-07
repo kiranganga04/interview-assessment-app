@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -37,5 +38,17 @@ public class ReportController {
     @GetMapping("/panelist-calibration")
     public List<PanelistCalibrationDTO> panelistCalibration() {
         return reportService.panelistCalibration();
+    }
+
+    /** Dashboard Overview "Monthly Interviews" chart. Defaults to the last 6 calendar months. */
+    @GetMapping("/monthly-interviews")
+    public List<MonthlyInterviewCountDTO> monthlyInterviews(@RequestParam(defaultValue = "6") int months) {
+        return reportService.monthlyInterviews(months);
+    }
+
+    /** Dashboard Overview "Today's Agenda". */
+    @GetMapping("/today-agenda")
+    public List<AgendaItemDTO> todaysAgenda() {
+        return reportService.todaysAgenda();
     }
 }
