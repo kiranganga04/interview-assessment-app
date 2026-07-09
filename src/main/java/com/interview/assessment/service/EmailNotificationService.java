@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * The single NotificationService bean. Whether a call actually sends a real email or just
@@ -58,6 +59,47 @@ public class EmailNotificationService implements NotificationService {
                 "Interview scheduled: " + candidateName,
                 "An interview for candidate " + candidateName + " has been scheduled for " + scheduledAt + ".\n\n"
                         + "Sign in to the Interview Assessment System for full details.");
+    }
+
+    @Override
+    public void interviewScheduled(String recipientEmail, String recipientLabel, String candidateName,
+            String position, String levelOfInterview, String scheduledAt, String meetingLink) {
+        if (!StringUtils.hasText(recipientEmail)) {
+            // Defensive only -- callers (InterviewService) are expected to have already validated
+            // that interviewer/candidate/recruiter emails are present before scheduling.
+            log.warn("[notification] Skipping interviewScheduled for '{}': no recipient email.", recipientLabel);
+            return;
+        }
+
+        String subject = "Interview scheduled: " + candidateName
+                + (StringUtils.hasText(position) ? " (" + position + ")" : "");
+
+        StringBuilder body = new StringBuilder();
+        body.append(greetingFor(recipientLabel, candidateName)).append("\n\n");
+        body.append("Candidate: ").append(candidateName).append("\n");
+        if (StringUtils.hasText(position)) {
+            body.append("Position: ").append(position).append("\n");
+        }
+        if (StringUtils.hasText(levelOfInterview)) {
+            body.append("Interview level: ").append(levelOfInterview).append("\n");
+        }
+        body.append("Date & time: ").append(scheduledAt).append("\n");
+        if (StringUtils.hasText(meetingLink)) {
+            body.append("Meeting link: ").append(meetingLink).append("\n");
+        }
+        body.append("\nSign in to the Interview Assessment System for full details.");
+
+        dispatch(recipientEmail, subject, body.toString());
+    }
+
+    private String greetingFor(String recipientLabel, String candidateName) {
+        if ("interviewer".equals(recipientLabel)) {
+            return "You have been scheduled to interview " + candidateName + ".";
+        }
+        if ("candidate".equals(recipientLabel)) {
+            return "Your interview has been scheduled. Here are the details:";
+        }
+        return "An interview has been scheduled. Here are the details:";
     }
 
     @Override

@@ -16,4 +16,15 @@ public final class CurrentUser {
         }
         return authentication.getName();
     }
+
+    /** True if the currently authenticated caller holds the given role (e.g. "PANEL", no "ROLE_" prefix needed). */
+    public static boolean hasRole(String role) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return false;
+        }
+        String target = "ROLE_" + role;
+        return authentication.getAuthorities().stream()
+                .anyMatch(a -> target.equals(a.getAuthority()));
+    }
 }

@@ -34,6 +34,12 @@ public class Interview extends AuditableEntity {
     @Column(name = "recruiter_name", length = 150)
     private String recruiterName;
 
+    // Recipient for the "Schedule Interview" confirmation email -- free text like
+    // recruiterName above, not tied to an AppUser login. Populated by the Schedule
+    // Interview flow; the plain "New assessment" create() flow leaves it null.
+    @Column(name = "recruiter_email", length = 180)
+    private String recruiterEmail;
+
     /** Nullable: only set when this interview was created via the Schedule Interview / slot-booking flow. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "interviewer_id")
@@ -54,6 +60,10 @@ public class Interview extends AuditableEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "mode_of_interview", length = 20)
     private InterviewMode modeOfInterview = InterviewMode.VIRTUAL;
+
+    // Zoom/Google Meet link, required when modeOfInterview is VIRTUAL (see InterviewService.scheduleFromSlot).
+    @Column(name = "meeting_link", length = 500)
+    private String meetingLink;
 
     @Column(name = "interview_date")
     private LocalDate interviewDate;

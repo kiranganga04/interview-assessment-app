@@ -20,6 +20,11 @@ public class Candidate extends AuditableEntity {
     @Column(name = "candidate_name", nullable = false, length = 150)
     private String candidateName;
 
+    // Nullable at the DB/entity level (existing candidates predate this column) --
+    // required specifically before scheduling an interview, enforced in InterviewService.
+    @Column(name = "email", length = 180)
+    private String email;
+
     @Column(name = "mobile_number", length = 20)
     private String mobileNumber;
 

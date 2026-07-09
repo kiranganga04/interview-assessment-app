@@ -21,6 +21,7 @@ public class InterviewDTO {
 
     private String panelMemberName;
     private String recruiterName;
+    private String recruiterEmail;
 
     // Only populated for interviews created via the Schedule Interview / slot-booking flow.
     private Long interviewerId;
@@ -31,6 +32,7 @@ public class InterviewDTO {
 
     private String levelOfInterview;
     private String modeOfInterview;
+    private String meetingLink;
     private LocalDate interviewDate;
     private String domainKnowledge;
     private String domainFeedback;

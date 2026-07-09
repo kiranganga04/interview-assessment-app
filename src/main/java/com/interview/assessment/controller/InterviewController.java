@@ -42,7 +42,26 @@ public class InterviewController {
         return interviewService.get(id);
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER','PANEL')")
+    /**
+     * Feedback & Reports: a Panel member's own "to-do list" -- only interviews assigned to them
+     * (matched by login email against the Interviewers directory) that are still awaiting
+     * feedback. Backs the "My Interviews" page, which replaces free-form candidate selection
+     * for Panel logins.
+     */
+    @PreAuthorize("hasRole('PANEL')")
+    @GetMapping("/mine")
+    public java.util.List<InterviewDTO> mine() {
+        return interviewService.myOpenInterviews();
+    }
+
+    /**
+     * ADMIN/RECRUITER only -- Panel members used to be able to free-create an assessment record
+     * for any candidate via this endpoint, which is exactly the loophole the "My Interviews" /
+     * candidate-restriction change closes. Panel now only ever submits feedback by editing an
+     * interview that's already assigned to them (see update()/changeStatus() ownership checks
+     * in InterviewService), never by creating a brand new one.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
     @PostMapping
     public InterviewDTO create(@Valid @RequestBody InterviewDTO dto) {
         return interviewService.create(dto);

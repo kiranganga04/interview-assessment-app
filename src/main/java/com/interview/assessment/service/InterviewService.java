@@ -9,11 +9,13 @@ import com.interview.assessment.repository.InterviewRepository;
 import com.interview.assessment.repository.InterviewSlotRepository;
 import com.interview.assessment.repository.InterviewerRepository;
 import com.interview.assessment.repository.SkillRepository;
+import com.interview.assessment.security.CurrentUser;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -61,6 +63,25 @@ public class InterviewService {
         return toDto(findOrThrow(id));
     }
 
+    /**
+     * Feedback & Reports: a Panel member's "to-do list" -- only interviews where they're the
+     * assigned interviewer (matched by login email against the Interviewers directory, the only
+     * link between the two today -- see Interviewer.java) and still awaiting feedback (not yet
+     * SUBMITTED/RECOMMENDED/CLOSED/CANCELLED). If their login email doesn't match any Interviewer
+     * directory row, they simply have no assigned interviews -- an empty list, not an error.
+     */
+    @Transactional(readOnly = true)
+    public List<InterviewDTO> myOpenInterviews() {
+        String callerEmail = CurrentUser.emailOrSystem();
+        return interviewerRepository.findByEmailIgnoreCase(callerEmail)
+                .map(interviewer -> interviewRepository.findByInterviewerAndStatusIn(
+                        interviewer, List.of(InterviewStatus.SCHEDULED, InterviewStatus.IN_PROGRESS)))
+                .orElseGet(List::of)
+                .stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
     @Transactional
     public InterviewDTO create(InterviewDTO dto) {
         Interview interview = new Interview();
@@ -91,15 +112,29 @@ public class InterviewService {
             throw new BadRequestException("This slot is no longer available -- please pick another.");
         }
 
+        Candidate candidate = findCandidate(request.getCandidateId());
+        if (!StringUtils.hasText(candidate.getEmail())) {
+            throw new BadRequestException(
+                    "This candidate doesn't have an email on file yet. Add one from the Candidates page "
+                            + "(or enter a new candidate with an email) before scheduling.");
+        }
+        // Meeting link only makes sense for an online session -- an in-person or phone slot has
+        // nowhere to put it, so it's only required when the slot's mode is VIRTUAL.
+        if (slot.getMode() == InterviewMode.VIRTUAL && !StringUtils.hasText(request.getMeetingLink())) {
+            throw new BadRequestException("A meeting link is required for online interviews.");
+        }
+
         Interview interview = new Interview();
-        interview.setCandidate(findCandidate(request.getCandidateId()));
+        interview.setCandidate(candidate);
         interview.setInterviewer(slot.getInterviewer());
         interview.setSlot(slot);
         interview.setPanelMemberName(slot.getInterviewer().getFullName());
         interview.setRecruiterName(request.getRecruiterName());
+        interview.setRecruiterEmail(request.getRecruiterEmail());
         interview.setPosition(request.getPosition());
         interview.setLevelOfInterview(parseLevel(request.getLevelOfInterview()));
         interview.setModeOfInterview(slot.getMode());
+        interview.setMeetingLink(request.getMeetingLink());
         interview.setInterviewDate(slot.getSlotDate());
         interview.setScheduledAt(slot.getSlotDate().atTime(slot.getStartTime()));
         interview.setStatus(InterviewStatus.SCHEDULED);
@@ -110,14 +145,37 @@ public class InterviewService {
         interview = interviewRepository.save(interview);
         auditService.record("Interview", interview.getInterviewId(), "SCHEDULE",
                 "slot=" + slot.getSlotCode() + " interviewer=" + slot.getInterviewer().getFullName());
-        notificationService.interviewScheduled(request.getRecruiterName(),
-                interview.getCandidate().getCandidateName(), interview.getScheduledAt().toString());
+
+        notifyScheduleParticipants(interview, slot);
         return toDto(interview);
+    }
+
+    /**
+     * Emails the interviewer, candidate, and recruiter separately (each is a distinct real
+     * address by this point -- candidate email and recruiter email are both validated/required
+     * above) with the full session details, including the meeting link when there is one.
+     * A failed send for one recipient (bad address, SMTP hiccup) is logged and swallowed inside
+     * EmailNotificationService and never blocks the other two, or the scheduling transaction.
+     */
+    private void notifyScheduleParticipants(Interview interview, InterviewSlot slot) {
+        String candidateName = interview.getCandidate().getCandidateName();
+        String position = interview.getPosition();
+        String level = interview.getLevelOfInterview() != null ? interview.getLevelOfInterview().name() : null;
+        String scheduledAtDisplay = interview.getScheduledAt() != null ? interview.getScheduledAt().toString() : "";
+        String meetingLink = interview.getMeetingLink();
+
+        notificationService.interviewScheduled(slot.getInterviewer().getEmail(), "interviewer",
+                candidateName, position, level, scheduledAtDisplay, meetingLink);
+        notificationService.interviewScheduled(interview.getCandidate().getEmail(), "candidate",
+                candidateName, position, level, scheduledAtDisplay, meetingLink);
+        notificationService.interviewScheduled(interview.getRecruiterEmail(), "recruiter",
+                candidateName, position, level, scheduledAtDisplay, meetingLink);
     }
 
     @Transactional
     public InterviewDTO update(Long id, InterviewDTO dto) {
         Interview interview = findOrThrow(id);
+        enforceOwnershipIfPanel(interview);
         if (dto.getCandidateId() != null && !dto.getCandidateId().equals(interview.getCandidate().getCandidateId())) {
             interview.setCandidate(findCandidate(dto.getCandidateId()));
         }
@@ -130,6 +188,7 @@ public class InterviewService {
     @Transactional
     public InterviewDTO changeStatus(Long id, String requestedStatus) {
         Interview interview = findOrThrow(id);
+        enforceOwnershipIfPanel(interview);
         InterviewStatus next = parseStatus(requestedStatus);
         Set<InterviewStatus> allowed = ALLOWED_TRANSITIONS.getOrDefault(interview.getStatus(), Set.of());
         if (!allowed.contains(next)) {
@@ -216,9 +275,30 @@ public class InterviewService {
                 .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + id));
     }
 
+    /**
+     * A Panel login can only ever hold the PANEL role (AppUser.role is a single value, never a
+     * combination), so this check only matters for PANEL callers -- ADMIN/RECRUITER are never
+     * affected. Blocks a Panel member from editing/advancing an interview that isn't theirs, even
+     * if they reach it directly by URL or API call rather than through "My Interviews" -- the
+     * frontend filtering alone would only be cosmetic without this.
+     */
+    private void enforceOwnershipIfPanel(Interview interview) {
+        if (!CurrentUser.hasRole("PANEL")) {
+            return;
+        }
+        String callerEmail = CurrentUser.emailOrSystem();
+        Interviewer interviewer = interview.getInterviewer();
+        boolean owns = interviewer != null && interviewer.getEmail() != null
+                && interviewer.getEmail().equalsIgnoreCase(callerEmail);
+        if (!owns) {
+            throw new AccessDeniedException("You can only submit feedback for interviews assigned to you.");
+        }
+    }
+
     private void applyFields(Interview interview, InterviewDTO dto) {
         interview.setPanelMemberName(dto.getPanelMemberName());
         interview.setRecruiterName(dto.getRecruiterName());
+        interview.setRecruiterEmail(dto.getRecruiterEmail());
         interview.setPosition(dto.getPosition());
         if (StringUtils.hasText(dto.getLevelOfInterview())) {
             interview.setLevelOfInterview(InterviewLevel.valueOf(dto.getLevelOfInterview().toUpperCase()));
@@ -226,6 +306,7 @@ public class InterviewService {
         if (StringUtils.hasText(dto.getModeOfInterview())) {
             interview.setModeOfInterview(InterviewMode.valueOf(dto.getModeOfInterview().toUpperCase()));
         }
+        interview.setMeetingLink(dto.getMeetingLink());
         interview.setInterviewDate(dto.getInterviewDate());
         interview.setDomainKnowledge(dto.getDomainKnowledge());
         interview.setDomainFeedback(dto.getDomainFeedback());
@@ -300,6 +381,7 @@ public class InterviewService {
         dto.setOverallExperience(interview.getCandidate().getOverallExperience());
         dto.setPanelMemberName(interview.getPanelMemberName());
         dto.setRecruiterName(interview.getRecruiterName());
+        dto.setRecruiterEmail(interview.getRecruiterEmail());
         if (interview.getInterviewer() != null) {
             dto.setInterviewerId(interview.getInterviewer().getInterviewerId());
             dto.setInterviewerName(interview.getInterviewer().getFullName());
@@ -311,6 +393,7 @@ public class InterviewService {
         dto.setPosition(interview.getPosition());
         dto.setLevelOfInterview(interview.getLevelOfInterview() != null ? interview.getLevelOfInterview().name() : null);
         dto.setModeOfInterview(interview.getModeOfInterview() != null ? interview.getModeOfInterview().name() : null);
+        dto.setMeetingLink(interview.getMeetingLink());
         dto.setInterviewDate(interview.getInterviewDate());
         dto.setDomainKnowledge(interview.getDomainKnowledge());
         dto.setDomainFeedback(interview.getDomainFeedback());

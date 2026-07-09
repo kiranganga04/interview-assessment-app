@@ -74,6 +74,7 @@ public class CandidateService {
 
     private void applyFields(Candidate candidate, CandidateDTO dto) {
         candidate.setCandidateName(dto.getCandidateName());
+        candidate.setEmail(dto.getEmail());
         candidate.setMobileNumber(dto.getMobileNumber());
         candidate.setOverallExperience(dto.getOverallExperience());
         candidate.setCurrentRole(dto.getCurrentRole());
@@ -83,6 +84,7 @@ public class CandidateService {
         CandidateDTO dto = new CandidateDTO();
         dto.setCandidateId(candidate.getCandidateId());
         dto.setCandidateName(candidate.getCandidateName());
+        dto.setEmail(candidate.getEmail());
         dto.setMobileNumber(candidate.getMobileNumber());
         dto.setOverallExperience(candidate.getOverallExperience());
         dto.setCurrentRole(candidate.getCurrentRole());
