@@ -1,9 +1,13 @@
 package com.interview.assessment.controller;
 
 import com.interview.assessment.dto.CandidateDTO;
+import com.interview.assessment.dto.PageResponse;
 import com.interview.assessment.service.CandidateService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -20,6 +24,20 @@ public class CandidateController {
     @GetMapping
     public List<CandidateDTO> list(@RequestParam(required = false) String name) {
         return candidateService.search(name);
+    }
+
+    /**
+     * People Management: page/size/sort + search/email filters, backing the Candidates
+     * directory table's pagination. Separate from list() above, which stays a plain,
+     * unpaginated (capped) list for the candidate picker dropdown (assessment form /
+     * Schedule Interview wizard).
+     */
+    @GetMapping("/search")
+    public PageResponse<CandidateDTO> search(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String emailFilter,
+            @PageableDefault(size = 10, sort = "candidateName", direction = Sort.Direction.ASC) Pageable pageable) {
+        return candidateService.searchPaged(search, emailFilter, pageable);
     }
 
     @GetMapping("/{id}")

@@ -1,16 +1,22 @@
 package com.interview.assessment.service;
 
 import com.interview.assessment.dto.CandidateDTO;
+import com.interview.assessment.dto.PageResponse;
 import com.interview.assessment.entity.Candidate;
 import com.interview.assessment.exception.ResourceNotFoundException;
 import com.interview.assessment.repository.CandidateRepository;
+import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -35,6 +41,40 @@ public class CandidateService {
                 ? candidateRepository.findByCandidateNameContainingIgnoreCase(name, pageable)
                 : candidateRepository.findAll(pageable);
         return page.map(this::toDto).getContent();
+    }
+
+    /**
+     * People Management: page/size/sort + search/email filters for the Candidates directory
+     * table, mirroring InterviewService.search()'s Specification + Pageable pattern (module 8).
+     * Deliberately separate from search(name) above -- that method backs the candidate picker
+     * dropdown (assessment form / Schedule Interview wizard), which needs a plain unpaginated
+     * list capped at MAX_RESULTS, not one page of the directory.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<CandidateDTO> searchPaged(String search, String emailFilter, Pageable pageable) {
+        Specification<Candidate> spec = buildSpecification(search, emailFilter);
+        Page<Candidate> page = candidateRepository.findAll(spec, pageable);
+        return PageResponse.from(page.map(this::toDto));
+    }
+
+    private Specification<Candidate> buildSpecification(String search, String emailFilter) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (StringUtils.hasText(search)) {
+                String like = "%" + search.toLowerCase() + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("candidateName")), like),
+                        cb.like(cb.lower(cb.coalesce(root.get("email"), "")), like),
+                        cb.like(cb.lower(cb.coalesce(root.get("mobileNumber"), "")), like),
+                        cb.like(cb.lower(cb.coalesce(root.get("currentRole"), "")), like)));
+            }
+            if ("HAS_EMAIL".equalsIgnoreCase(emailFilter)) {
+                predicates.add(cb.and(cb.isNotNull(root.get("email")), cb.notEqual(root.get("email"), "")));
+            } else if ("NO_EMAIL".equalsIgnoreCase(emailFilter)) {
+                predicates.add(cb.or(cb.isNull(root.get("email")), cb.equal(root.get("email"), "")));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
     }
 
     @Transactional(readOnly = true)

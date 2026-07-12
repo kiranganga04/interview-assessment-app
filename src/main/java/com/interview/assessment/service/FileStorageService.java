@@ -11,6 +11,7 @@ import com.interview.assessment.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -26,6 +27,13 @@ import java.util.UUID;
 /**
  * Module 5: local-disk file storage for resumes / interview screenshots. Deliberately
  * behind a narrow interface-shaped service so swapping in S3 later only touches this class.
+ *
+ * Access control (added after a baseline OpenSpec review found none of this existed at all):
+ * a CANDIDATE_RESUME is readable by any authenticated role, same as the candidate directory
+ * itself, but only ADMIN/RECRUITER may upload one -- matching who can create/edit a candidate
+ * record. An INTERVIEW_SCREENSHOT follows the exact same rule as the interview it belongs to
+ * (see InterviewService.assertPanelCanAccessInterview): ADMIN/RECRUITER always, PANEL only for
+ * an interview they're the assigned interviewer on -- for upload, listing, and download alike.
  */
 @Service
 @RequiredArgsConstructor
@@ -37,9 +45,11 @@ public class FileStorageService {
 
     private final FileStorageProperties properties;
     private final AttachmentRepository attachmentRepository;
+    private final InterviewService interviewService;
 
     @Transactional
     public AttachmentDTO store(AttachmentOwnerType ownerType, Long ownerId, MultipartFile file) {
+        enforceAccess(ownerType, ownerId, true);
         if (file.isEmpty()) {
             throw new BadRequestException("Uploaded file is empty.");
         }
@@ -80,13 +90,30 @@ public class FileStorageService {
 
     @Transactional(readOnly = true)
     public List<AttachmentDTO> listFor(AttachmentOwnerType ownerType, Long ownerId) {
+        enforceAccess(ownerType, ownerId, false);
         return attachmentRepository.findByOwnerTypeAndOwnerId(ownerType, ownerId).stream().map(this::toDto).toList();
     }
 
     @Transactional(readOnly = true)
     public Attachment findMeta(Long attachmentId) {
-        return attachmentRepository.findById(attachmentId)
+        Attachment attachment = attachmentRepository.findById(attachmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Attachment not found: " + attachmentId));
+        enforceAccess(attachment.getOwnerType(), attachment.getOwnerId(), false);
+        return attachment;
+    }
+
+    /**
+     * @param uploading true for the upload path (stricter -- CANDIDATE_RESUME needs
+     *                  ADMIN/RECRUITER), false for list/download (CANDIDATE_RESUME open to any
+     *                  authenticated role). INTERVIEW_SCREENSHOT is checked the same way either
+     *                  way, since it always follows the underlying interview's ownership rule.
+     */
+    private void enforceAccess(AttachmentOwnerType ownerType, Long ownerId, boolean uploading) {
+        if (ownerType == AttachmentOwnerType.INTERVIEW_SCREENSHOT) {
+            interviewService.assertPanelCanAccessInterview(ownerId);
+        } else if (ownerType == AttachmentOwnerType.CANDIDATE_RESUME && uploading && CurrentUser.hasRole("PANEL")) {
+            throw new AccessDeniedException("Only Admin or Recruiter can upload a candidate resume.");
+        }
     }
 
     public Resource loadAsResource(Attachment attachment) {

@@ -1,14 +1,21 @@
 package com.interview.assessment.service;
 
 import com.interview.assessment.dto.InterviewerDTO;
+import com.interview.assessment.dto.PageResponse;
 import com.interview.assessment.entity.Interviewer;
 import com.interview.assessment.exception.BadRequestException;
 import com.interview.assessment.exception.ResourceNotFoundException;
 import com.interview.assessment.repository.InterviewerRepository;
+import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
@@ -26,6 +33,38 @@ public class InterviewerService {
                 .map(this::toDto)
                 .sorted(Comparator.comparing(InterviewerDTO::getFullName))
                 .toList();
+    }
+
+    /**
+     * People Management: page/size/sort + search/status filters for the Interviewers directory
+     * table, mirroring InterviewService.search()'s Specification + Pageable pattern (module 8).
+     * Deliberately a separate endpoint from listAll() rather than a replacement -- listAll()
+     * still backs the Interviewer dropdowns (Add Slot form, Teams view) which need the whole
+     * directory in one call, not one page of it.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<InterviewerDTO> search(String search, String status, Pageable pageable) {
+        Specification<Interviewer> spec = buildSpecification(search, status);
+        Page<Interviewer> page = interviewerRepository.findAll(spec, pageable);
+        return PageResponse.from(page.map(this::toDto));
+    }
+
+    private Specification<Interviewer> buildSpecification(String search, String status) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (StringUtils.hasText(status)) {
+                predicates.add(cb.equal(root.get("active"), "ACTIVE".equalsIgnoreCase(status)));
+            }
+            if (StringUtils.hasText(search)) {
+                String like = "%" + search.toLowerCase() + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("fullName")), like),
+                        cb.like(cb.lower(root.get("email")), like),
+                        cb.like(cb.lower(cb.coalesce(root.get("account"), "")), like),
+                        cb.like(cb.lower(cb.coalesce(root.get("skillSet"), "")), like)));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
     }
 
     @Transactional(readOnly = true)

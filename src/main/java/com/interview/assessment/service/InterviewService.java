@@ -60,7 +60,21 @@ public class InterviewService {
 
     @Transactional(readOnly = true)
     public InterviewDTO get(Long id) {
-        return toDto(findOrThrow(id));
+        Interview interview = findOrThrow(id);
+        enforceOwnershipIfPanel(interview);
+        return toDto(interview);
+    }
+
+    /**
+     * Attachments: lets FileStorageService apply the exact same Panel-ownership rule to
+     * INTERVIEW_SCREENSHOT attachments (upload, list, download) as already applies to the
+     * interview record itself, without duplicating the ownership-matching logic in two places.
+     * Throws if the interview doesn't exist, or if the caller is a PANEL user who isn't the
+     * assigned interviewer; a no-op for ADMIN/RECRUITER.
+     */
+    @Transactional(readOnly = true)
+    public void assertPanelCanAccessInterview(Long interviewId) {
+        enforceOwnershipIfPanel(findOrThrow(interviewId));
     }
 
     /**
@@ -91,7 +105,12 @@ public class InterviewService {
         auditService.record("Interview", interview.getInterviewId(), "CREATE",
                 "level=" + interview.getLevelOfInterview() + " candidateId=" + dto.getCandidateId());
         if (interview.getScheduledAt() != null) {
-            notificationService.interviewScheduled(interview.getRecruiterName(),
+            // Use the recruiter's email, not their free-text display name -- interviewScheduled's
+            // first argument is the notification recipient address. (Note: the plain "New
+            // assessment" form does not currently collect a recruiter email, so this will often
+            // be blank here; EmailNotificationService logs/no-ops gracefully on a blank recipient
+            // rather than attempting to send to an invalid address.)
+            notificationService.interviewScheduled(interview.getRecruiterEmail(),
                     interview.getCandidate().getCandidateName(), interview.getScheduledAt().toString());
         }
         return toDto(interview);
@@ -201,7 +220,9 @@ public class InterviewService {
         }
         interview = interviewRepository.save(interview);
         auditService.record("Interview", interview.getInterviewId(), "STATUS_CHANGE", next.name());
-        notificationService.interviewStatusChanged(interview.getRecruiterName(),
+        // Use the recruiter's email, not their free-text display name -- interviewStatusChanged's
+        // first argument is the notification recipient address.
+        notificationService.interviewStatusChanged(interview.getRecruiterEmail(),
                 interview.getCandidate().getCandidateName(), next.name());
         return toDto(interview);
     }
@@ -278,9 +299,9 @@ public class InterviewService {
     /**
      * A Panel login can only ever hold the PANEL role (AppUser.role is a single value, never a
      * combination), so this check only matters for PANEL callers -- ADMIN/RECRUITER are never
-     * affected. Blocks a Panel member from editing/advancing an interview that isn't theirs, even
-     * if they reach it directly by URL or API call rather than through "My Interviews" -- the
-     * frontend filtering alone would only be cosmetic without this.
+     * affected. Blocks a Panel member from viewing, editing, or advancing an interview that isn't
+     * theirs, even if they reach it directly by URL or API call rather than through
+     * "My Interviews" -- the frontend filtering alone would only be cosmetic without this.
      */
     private void enforceOwnershipIfPanel(Interview interview) {
         if (!CurrentUser.hasRole("PANEL")) {
@@ -291,7 +312,7 @@ public class InterviewService {
         boolean owns = interviewer != null && interviewer.getEmail() != null
                 && interviewer.getEmail().equalsIgnoreCase(callerEmail);
         if (!owns) {
-            throw new AccessDeniedException("You can only submit feedback for interviews assigned to you.");
+            throw new AccessDeniedException("You can only view or edit interviews assigned to you.");
         }
     }
 

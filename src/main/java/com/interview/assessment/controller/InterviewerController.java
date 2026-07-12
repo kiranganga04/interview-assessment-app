@@ -1,9 +1,13 @@
 package com.interview.assessment.controller;
 
 import com.interview.assessment.dto.InterviewerDTO;
+import com.interview.assessment.dto.PageResponse;
 import com.interview.assessment.service.InterviewerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +30,19 @@ public class InterviewerController {
     @GetMapping
     public List<InterviewerDTO> list() {
         return interviewerService.listAll();
+    }
+
+    /**
+     * People Management: page/size/sort + search/status filters, backing the Interviewers
+     * directory table's pagination. Separate from list() above, which still returns the full
+     * directory in one call for dropdowns (Add Slot form, Teams view).
+     */
+    @GetMapping("/search")
+    public PageResponse<InterviewerDTO> search(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String status,
+            @PageableDefault(size = 10, sort = "fullName", direction = Sort.Direction.ASC) Pageable pageable) {
+        return interviewerService.search(search, status, pageable);
     }
 
     @GetMapping("/{id}")

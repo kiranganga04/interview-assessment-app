@@ -65,11 +65,28 @@ public class UserService {
     public UserSummaryDTO updateRole(Long userId, UserRoleUpdateDTO update) {
         AppUser user = appUserRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
+
+        UserRole newRole;
         try {
-            user.setRole(UserRole.valueOf(update.getRole().toUpperCase()));
+            newRole = UserRole.valueOf(update.getRole().toUpperCase());
         } catch (IllegalArgumentException ex) {
             throw new BadRequestException("Unknown role: " + update.getRole());
         }
+        boolean willBeActive = update.getActive() == null || update.getActive();
+        boolean losesAdminStatus = user.getRole() == UserRole.ADMIN
+                && (newRole != UserRole.ADMIN || !willBeActive);
+
+        // Only an ADMIN can ever reach this endpoint (@PreAuthorize on UserController), so if
+        // this user is currently the only active Admin, the caller can only be this same user --
+        // guard against them locking everyone (including themselves) out of user administration
+        // by demoting or deactivating the last remaining Admin account.
+        if (losesAdminStatus && appUserRepository.countByRoleAndActiveTrue(UserRole.ADMIN) <= 1) {
+            throw new BadRequestException(
+                    "This is the only active Admin account left. Promote another account to Admin "
+                            + "before changing this one's role or deactivating it.");
+        }
+
+        user.setRole(newRole);
         if (update.getActive() != null) {
             user.setActive(update.getActive());
             if (!update.getActive()) {
