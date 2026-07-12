@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep -liE \"RECRUITER|PANEL|role\")",
+      "Bash(mvn -Dtest=AuthServiceTest test)",
+      "Bash(mvn test *)",
+      "Bash(npm run *)"
+    ]
+  }
+}
