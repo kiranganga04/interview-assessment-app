@@ -32,8 +32,9 @@ import java.util.UUID;
  * a CANDIDATE_RESUME is readable by any authenticated role, same as the candidate directory
  * itself, but only ADMIN/RECRUITER may upload one -- matching who can create/edit a candidate
  * record. An INTERVIEW_SCREENSHOT follows the exact same rule as the interview it belongs to
- * (see InterviewService.assertPanelCanAccessInterview): ADMIN/RECRUITER always, PANEL only for
- * an interview they're the assigned interviewer on -- for upload, listing, and download alike.
+ * (see InterviewService.assertCanAccessInterview): ADMIN always, RECRUITER only for an interview
+ * they created or are assigned to, PANEL only for an interview they're the assigned interviewer
+ * on -- for upload, listing, and download alike.
  */
 @Service
 @RequiredArgsConstructor
@@ -110,7 +111,7 @@ public class FileStorageService {
      */
     private void enforceAccess(AttachmentOwnerType ownerType, Long ownerId, boolean uploading) {
         if (ownerType == AttachmentOwnerType.INTERVIEW_SCREENSHOT) {
-            interviewService.assertPanelCanAccessInterview(ownerId);
+            interviewService.assertCanAccessInterview(ownerId);
         } else if (ownerType == AttachmentOwnerType.CANDIDATE_RESUME && uploading && CurrentUser.hasRole("PANEL")) {
             throw new AccessDeniedException("Only Admin or Recruiter can upload a candidate resume.");
         }

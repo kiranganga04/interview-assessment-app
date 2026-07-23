@@ -10,10 +10,18 @@ import java.util.List;
 
 /**
  * Module 8: JpaSpecificationExecutor lets InterviewService compose dynamic
- * candidate/level/status/date filters without a repository method per combination.
+ * candidate/level/status/date filters (and the RBAC visibility filter in
+ * InterviewSpecifications) without a repository method per combination.
  */
 public interface InterviewRepository extends JpaRepository<Interview, Long>, JpaSpecificationExecutor<Interview> {
 
     /** Feedback & Reports: a Panel member's open (not-yet-submitted) assigned interviews. */
     List<Interview> findByInterviewerAndStatusIn(Interviewer interviewer, List<InterviewStatus> statuses);
+
+    /**
+     * Feedback & Reports: a Panel member's full interview history -- every interview assigned to
+     * them as the interviewer, any status, most recent first (ordered by id as a stable proxy for
+     * creation order since scheduled_at can be null on older records).
+     */
+    List<Interview> findByInterviewerOrderByInterviewIdDesc(Interviewer interviewer);
 }

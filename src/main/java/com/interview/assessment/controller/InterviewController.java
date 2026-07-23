@@ -2,6 +2,7 @@ package com.interview.assessment.controller;
 
 import com.interview.assessment.dto.InterviewDTO;
 import com.interview.assessment.dto.PageResponse;
+import com.interview.assessment.dto.RescheduleRequest;
 import com.interview.assessment.dto.ScheduleInterviewRequest;
 import com.interview.assessment.dto.StatusChangeRequest;
 import com.interview.assessment.service.InterviewService;
@@ -25,7 +26,9 @@ public class InterviewController {
     /**
      * Module 8: page/size/sort + level/status/search filters, all optional for backwards compatibility.
      * PANEL intentionally excluded: panel members submit/manage their own assessments (create + view a
-     * specific record by id) but don't get to browse the full assessments list.
+     * specific record by id) but don't get to browse the full assessments list. For ADMIN the list is
+     * unrestricted; for RECRUITER it is scoped server-side to the records they own (see
+     * InterviewService.search / InterviewSpecifications).
      */
     @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
     @GetMapping
@@ -52,6 +55,18 @@ public class InterviewController {
     @GetMapping("/mine")
     public java.util.List<InterviewDTO> mine() {
         return interviewService.myOpenInterviews();
+    }
+
+    /**
+     * Feedback & Reports: a Panel member's full interview history -- every interview assigned to
+     * them as the interviewer, any status, most recent first. Backs the "My Interview History"
+     * page. PANEL-only, and always scoped to the caller inside the service, so a panel member can
+     * only ever see their own history.
+     */
+    @PreAuthorize("hasRole('PANEL')")
+    @GetMapping("/mine/history")
+    public java.util.List<InterviewDTO> myHistory() {
+        return interviewService.myInterviewHistory();
     }
 
     /**
@@ -85,10 +100,38 @@ public class InterviewController {
         return interviewService.update(id, dto);
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER','PANEL')")
+    /**
+     * Interview lifecycle (IN_PROGRESS / SUBMITTED / RECOMMENDED / CLOSED / CANCELLED) is a
+     * recruiter/admin responsibility. PANEL is intentionally excluded: a panelist advances an
+     * interview only by submitting their feedback (see /submit-feedback), never by driving the
+     * status directly, and cannot close or cancel a record.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
     @PatchMapping("/{id}/status")
     public InterviewDTO changeStatus(@PathVariable Long id, @Valid @RequestBody StatusChangeRequest request) {
         return interviewService.changeStatus(id, request.getStatus());
+    }
+
+    /**
+     * Explicit reschedule: move an interview to a new date/time (and optionally update the meeting
+     * link). Recruiter/admin only -- rescheduling is a coordination concern (slots, candidate
+     * availability), not a panelist action. Emails all parties the new time and records a
+     * RESCHEDULE audit entry.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")
+    @PatchMapping("/{id}/reschedule")
+    public InterviewDTO reschedule(@PathVariable Long id, @Valid @RequestBody RescheduleRequest request) {
+        return interviewService.reschedule(id, request);
+    }
+
+    /**
+     * Panel feedback submission: saves the assessment and moves the interview to SUBMITTED in one
+     * call, then emails the recruiter a link to review it. Assigned panelist / owning recruiter / admin.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','RECRUITER','PANEL')")
+    @PostMapping("/{id}/submit-feedback")
+    public InterviewDTO submitFeedback(@PathVariable Long id, @Valid @RequestBody InterviewDTO dto) {
+        return interviewService.submitFeedback(id, dto);
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','RECRUITER')")

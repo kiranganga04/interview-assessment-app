@@ -1,11 +1,14 @@
 package com.interview.assessment.service;
 
+import com.interview.assessment.config.FileStorageProperties;
 import com.interview.assessment.dto.*;
 import com.interview.assessment.entity.*;
 import com.interview.assessment.exception.BadRequestException;
 import com.interview.assessment.exception.ResourceNotFoundException;
+import com.interview.assessment.repository.AttachmentRepository;
 import com.interview.assessment.repository.CandidateRepository;
 import com.interview.assessment.repository.InterviewRepository;
+import com.interview.assessment.repository.InterviewSpecifications;
 import com.interview.assessment.repository.InterviewSlotRepository;
 import com.interview.assessment.repository.InterviewerRepository;
 import com.interview.assessment.repository.SkillRepository;
@@ -50,10 +53,16 @@ public class InterviewService {
     private final InterviewerRepository interviewerRepository;
     private final AuditService auditService;
     private final NotificationService notificationService;
+    private final AttachmentRepository attachmentRepository;
+    private final FileStorageProperties fileStorageProperties;
 
     @Transactional(readOnly = true)
     public PageResponse<InterviewDTO> search(String levelOfInterview, String status, String search, Pageable pageable) {
-        Specification<Interview> spec = buildSpecification(levelOfInterview, status, search);
+        // RBAC: a RECRUITER only ever lists their own assessments; PANEL never reaches this
+        // endpoint (controller-gated); ADMIN sees everything. The visibility predicate is ANDed
+        // with the user's level/status/search filters so scoping can't be filtered away.
+        Specification<Interview> spec = InterviewSpecifications.visibleToCurrentUser()
+                .and(buildSpecification(levelOfInterview, status, search));
         Page<Interview> page = interviewRepository.findAll(spec, pageable);
         return PageResponse.from(page.map(this::toDto));
     }
@@ -61,20 +70,20 @@ public class InterviewService {
     @Transactional(readOnly = true)
     public InterviewDTO get(Long id) {
         Interview interview = findOrThrow(id);
-        enforceOwnershipIfPanel(interview);
+        enforceCanAccess(interview);
         return toDto(interview);
     }
 
     /**
-     * Attachments: lets FileStorageService apply the exact same Panel-ownership rule to
+     * Attachments: lets FileStorageService apply the exact same record-ownership rule to
      * INTERVIEW_SCREENSHOT attachments (upload, list, download) as already applies to the
      * interview record itself, without duplicating the ownership-matching logic in two places.
      * Throws if the interview doesn't exist, or if the caller is a PANEL user who isn't the
-     * assigned interviewer; a no-op for ADMIN/RECRUITER.
+     * assigned interviewer, or a RECRUITER who neither created nor is assigned to it; a no-op for ADMIN.
      */
     @Transactional(readOnly = true)
-    public void assertPanelCanAccessInterview(Long interviewId) {
-        enforceOwnershipIfPanel(findOrThrow(interviewId));
+    public void assertCanAccessInterview(Long interviewId) {
+        enforceCanAccess(findOrThrow(interviewId));
     }
 
     /**
@@ -96,6 +105,23 @@ public class InterviewService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Feedback & Reports: a Panel member's full interview history -- every interview assigned to
+     * them as the interviewer regardless of status (scheduled, in-progress, submitted, closed,
+     * cancelled), most recent first. Backs the "My Interview History" page. Same email-to-directory
+     * resolution as myOpenInterviews(): an unmatched login email yields an empty list, not an error.
+     */
+    @Transactional(readOnly = true)
+    public List<InterviewDTO> myInterviewHistory() {
+        String callerEmail = CurrentUser.emailOrSystem();
+        return interviewerRepository.findByEmailIgnoreCase(callerEmail)
+                .map(interviewRepository::findByInterviewerOrderByInterviewIdDesc)
+                .orElseGet(List::of)
+                .stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
     @Transactional
     public InterviewDTO create(InterviewDTO dto) {
         Interview interview = new Interview();
@@ -105,13 +131,11 @@ public class InterviewService {
         auditService.record("Interview", interview.getInterviewId(), "CREATE",
                 "level=" + interview.getLevelOfInterview() + " candidateId=" + dto.getCandidateId());
         if (interview.getScheduledAt() != null) {
-            // Use the recruiter's email, not their free-text display name -- interviewScheduled's
-            // first argument is the notification recipient address. (Note: the plain "New
-            // assessment" form does not currently collect a recruiter email, so this will often
-            // be blank here; EmailNotificationService logs/no-ops gracefully on a blank recipient
-            // rather than attempting to send to an invalid address.)
-            notificationService.interviewScheduled(interview.getRecruiterEmail(),
-                    interview.getCandidate().getCandidateName(), interview.getScheduledAt().toString());
+            // One email to whoever we have an address for. The plain "New assessment" flow has no
+            // interviewer/slot, so only candidate + recruiter are populated here; blank addresses
+            // are skipped inside the notification service. The candidate's resume (if already on
+            // file) is attached.
+            notificationService.interviewScheduled(emailDetails(interview), candidateResumeAttachments(interview.getCandidate()));
         }
         return toDto(interview);
     }
@@ -165,36 +189,68 @@ public class InterviewService {
         auditService.record("Interview", interview.getInterviewId(), "SCHEDULE",
                 "slot=" + slot.getSlotCode() + " interviewer=" + slot.getInterviewer().getFullName());
 
-        notifyScheduleParticipants(interview, slot);
+        notifyScheduleParticipants(interview);
         return toDto(interview);
     }
 
     /**
-     * Emails the interviewer, candidate, and recruiter separately (each is a distinct real
-     * address by this point -- candidate email and recruiter email are both validated/required
-     * above) with the full session details, including the meeting link when there is one.
-     * A failed send for one recipient (bad address, SMTP hiccup) is logged and swallowed inside
-     * EmailNotificationService and never blocks the other two, or the scheduling transaction.
+     * Sends ONE email addressed to the candidate, interviewer and recruiter together (previously
+     * three separate messages) with the full session details, including the meeting link when
+     * there is one. Blank addresses are skipped and a send failure is logged and swallowed inside
+     * EmailNotificationService, so it never blocks the scheduling transaction.
      */
-    private void notifyScheduleParticipants(Interview interview, InterviewSlot slot) {
-        String candidateName = interview.getCandidate().getCandidateName();
-        String position = interview.getPosition();
-        String level = interview.getLevelOfInterview() != null ? interview.getLevelOfInterview().name() : null;
-        String scheduledAtDisplay = interview.getScheduledAt() != null ? interview.getScheduledAt().toString() : "";
-        String meetingLink = interview.getMeetingLink();
+    private void notifyScheduleParticipants(Interview interview) {
+        notificationService.interviewScheduled(emailDetails(interview), candidateResumeAttachments(interview.getCandidate()));
+    }
 
-        notificationService.interviewScheduled(slot.getInterviewer().getEmail(), "interviewer",
-                candidateName, position, level, scheduledAtDisplay, meetingLink);
-        notificationService.interviewScheduled(interview.getCandidate().getEmail(), "candidate",
-                candidateName, position, level, scheduledAtDisplay, meetingLink);
-        notificationService.interviewScheduled(interview.getRecruiterEmail(), "recruiter",
-                candidateName, position, level, scheduledAtDisplay, meetingLink);
+    /**
+     * Resolves the candidate's resume for attaching to the scheduling email. Returns the single most
+     * recently uploaded CANDIDATE_RESUME (by attachment id) as an on-disk path, or an empty list when
+     * the candidate has no resume. The Schedule Interview flow uploads the resume BEFORE calling
+     * scheduleFromSlot, so it's already on file here.
+     */
+    private List<NotificationService.EmailAttachment> candidateResumeAttachments(Candidate candidate) {
+        if (candidate == null || candidate.getCandidateId() == null) {
+            return List.of();
+        }
+        return attachmentRepository
+                .findByOwnerTypeAndOwnerId(AttachmentOwnerType.CANDIDATE_RESUME, candidate.getCandidateId())
+                .stream()
+                .max(java.util.Comparator.comparing(Attachment::getAttachmentId))
+                .map(a -> List.of(new NotificationService.EmailAttachment(
+                        a.getOriginalFilename(),
+                        java.nio.file.Paths.get(fileStorageProperties.getDirectory(), a.getStoredFilename()).toString())))
+                .orElseGet(List::of);
+    }
+
+    /**
+     * Builds the shared email payload from an interview -- used by the scheduled, rescheduled and
+     * cancelled notifications so all three address the same candidate/interviewer/recruiter set.
+     * interviewer may be null (plain "New assessment" records have no slot/interviewer); the panel
+     * member's free-text name is used as the display fallback in that case.
+     */
+    private NotificationService.InterviewEmailDetails emailDetails(Interview interview) {
+        Candidate candidate = interview.getCandidate();
+        Interviewer interviewer = interview.getInterviewer();
+        return new NotificationService.InterviewEmailDetails(
+                interview.getInterviewId(),
+                candidate != null ? candidate.getEmail() : null,
+                candidate != null ? candidate.getCandidateName() : null,
+                interviewer != null ? interviewer.getEmail() : null,
+                interviewer != null ? interviewer.getFullName() : interview.getPanelMemberName(),
+                interview.getRecruiterEmail(),
+                interview.getRecruiterName(),
+                interview.getPosition(),
+                interview.getLevelOfInterview() != null ? interview.getLevelOfInterview().name() : null,
+                interview.getModeOfInterview() != null ? interview.getModeOfInterview().name() : null,
+                interview.getScheduledAt() != null ? interview.getScheduledAt().toString() : null,
+                interview.getMeetingLink());
     }
 
     @Transactional
     public InterviewDTO update(Long id, InterviewDTO dto) {
         Interview interview = findOrThrow(id);
-        enforceOwnershipIfPanel(interview);
+        enforceCanAccess(interview);
         if (dto.getCandidateId() != null && !dto.getCandidateId().equals(interview.getCandidate().getCandidateId())) {
             interview.setCandidate(findCandidate(dto.getCandidateId()));
         }
@@ -204,10 +260,41 @@ public class InterviewService {
         return toDto(interview);
     }
 
+    /**
+     * Explicit reschedule (distinct from a plain edit): moves the interview's date/time and, when
+     * provided, updates the meeting link. Allowed for the assigned panel member, the owning
+     * recruiter, or an admin (same ownership rule as everything else), and only while the interview
+     * is still live -- a CANCELLED or CLOSED interview can't be rescheduled. Records a RESCHEDULE
+     * audit entry and emails the candidate, interviewer and recruiter the new time in one message.
+     */
+    @Transactional
+    public InterviewDTO reschedule(Long id, RescheduleRequest request) {
+        Interview interview = findOrThrow(id);
+        enforceCanAccess(interview);
+        if (interview.getStatus() == InterviewStatus.CANCELLED || interview.getStatus() == InterviewStatus.CLOSED) {
+            throw new BadRequestException("A " + interview.getStatus().name().toLowerCase()
+                    + " interview can't be rescheduled.");
+        }
+
+        java.time.LocalDateTime previous = interview.getScheduledAt();
+        interview.setScheduledAt(request.getScheduledAt());
+        interview.setInterviewDate(request.getScheduledAt().toLocalDate());
+        if (StringUtils.hasText(request.getMeetingLink())) {
+            interview.setMeetingLink(request.getMeetingLink());
+        }
+        interview = interviewRepository.save(interview);
+        auditService.record("Interview", interview.getInterviewId(), "RESCHEDULE",
+                "from=" + (previous != null ? previous : "-") + " to=" + request.getScheduledAt()
+                        + (StringUtils.hasText(request.getReason()) ? " reason=" + request.getReason() : ""));
+        notificationService.interviewRescheduled(emailDetails(interview),
+                previous != null ? previous.toString() : null);
+        return toDto(interview);
+    }
+
     @Transactional
     public InterviewDTO changeStatus(Long id, String requestedStatus) {
         Interview interview = findOrThrow(id);
-        enforceOwnershipIfPanel(interview);
+        enforceCanAccess(interview);
         InterviewStatus next = parseStatus(requestedStatus);
         Set<InterviewStatus> allowed = ALLOWED_TRANSITIONS.getOrDefault(interview.getStatus(), Set.of());
         if (!allowed.contains(next)) {
@@ -220,16 +307,49 @@ public class InterviewService {
         }
         interview = interviewRepository.save(interview);
         auditService.record("Interview", interview.getInterviewId(), "STATUS_CHANGE", next.name());
-        // Use the recruiter's email, not their free-text display name -- interviewStatusChanged's
-        // first argument is the notification recipient address.
-        notificationService.interviewStatusChanged(interview.getRecruiterEmail(),
-                interview.getCandidate().getCandidateName(), next.name());
+        if (next == InterviewStatus.CANCELLED) {
+            // A cancellation notifies everyone involved (candidate + interviewer + recruiter) with a
+            // dedicated cancellation email, not just the recruiter with a generic status line.
+            notificationService.interviewCancelled(emailDetails(interview));
+        } else if (next == InterviewStatus.SUBMITTED) {
+            // Panel submitted their feedback -> notify the recruiter with a link to review it.
+            notificationService.interviewFeedbackSubmitted(emailDetails(interview));
+        } else {
+            // Other status changes keep the lighter recruiter-only notice.
+            notificationService.interviewStatusChanged(interview.getRecruiterEmail(),
+                    interview.getCandidate().getCandidateName(), next.name());
+        }
+        return toDto(interview);
+    }
+
+    /**
+     * Panel feedback submission: saves the panel's assessment (ratings, comments, recommendation,
+     * coding rounds) AND moves the interview to SUBMITTED in one atomic step, then emails the
+     * recruiter a link to review it. Allowed for the assigned panelist, the owning recruiter, or an
+     * admin; a CANCELLED or CLOSED interview can't accept feedback. The candidate is fixed here --
+     * only the assessment content and the status change.
+     */
+    @Transactional
+    public InterviewDTO submitFeedback(Long id, InterviewDTO dto) {
+        Interview interview = findOrThrow(id);
+        enforceCanAccess(interview);
+        if (interview.getStatus() == InterviewStatus.CANCELLED || interview.getStatus() == InterviewStatus.CLOSED) {
+            throw new BadRequestException("Feedback can't be submitted for a "
+                    + interview.getStatus().name().toLowerCase() + " interview.");
+        }
+        applyFields(interview, dto);
+        interview.setStatus(InterviewStatus.SUBMITTED);
+        interview = interviewRepository.save(interview);
+        auditService.record("Interview", interview.getInterviewId(), "FEEDBACK_SUBMITTED",
+                "final rating=" + interview.getFinalRating());
+        notificationService.interviewFeedbackSubmitted(emailDetails(interview));
         return toDto(interview);
     }
 
     @Transactional
     public void delete(Long id) {
         Interview interview = findOrThrow(id);
+        enforceCanAccess(interview);
         releaseSlotIfAny(interview);
         auditService.record("Interview", interview.getInterviewId(), "DELETE",
                 "candidate=" + interview.getCandidate().getCandidateName());
@@ -297,23 +417,38 @@ public class InterviewService {
     }
 
     /**
-     * A Panel login can only ever hold the PANEL role (AppUser.role is a single value, never a
-     * combination), so this check only matters for PANEL callers -- ADMIN/RECRUITER are never
-     * affected. Blocks a Panel member from viewing, editing, or advancing an interview that isn't
-     * theirs, even if they reach it directly by URL or API call rather than through
-     * "My Interviews" -- the frontend filtering alone would only be cosmetic without this.
+     * RBAC record-ownership guard for a single interview, mirroring the row visibility in
+     * InterviewSpecifications so a direct-by-id call (URL/API) can't bypass the list scoping:
+     *   ADMIN     -> always allowed.
+     *   PANEL     -> only the assigned interviewer (matched by login email against interviewer.email).
+     *   RECRUITER -> only an interview they created (created_by) or are the assigned recruiter for
+     *                (recruiter_email), matched case-insensitively against their login email.
+     * AppUser.role is a single value, so exactly one branch applies per caller.
      */
-    private void enforceOwnershipIfPanel(Interview interview) {
-        if (!CurrentUser.hasRole("PANEL")) {
+    private void enforceCanAccess(Interview interview) {
+        if (CurrentUser.hasRole("ADMIN")) {
             return;
         }
         String callerEmail = CurrentUser.emailOrSystem();
-        Interviewer interviewer = interview.getInterviewer();
-        boolean owns = interviewer != null && interviewer.getEmail() != null
-                && interviewer.getEmail().equalsIgnoreCase(callerEmail);
-        if (!owns) {
-            throw new AccessDeniedException("You can only view or edit interviews assigned to you.");
+        if (CurrentUser.hasRole("PANEL")) {
+            Interviewer interviewer = interview.getInterviewer();
+            boolean owns = interviewer != null && interviewer.getEmail() != null
+                    && interviewer.getEmail().equalsIgnoreCase(callerEmail);
+            if (!owns) {
+                throw new AccessDeniedException("You can only view or edit interviews assigned to you.");
+            }
+            return;
         }
+        if (CurrentUser.hasRole("RECRUITER")) {
+            boolean owns = (interview.getCreatedBy() != null && interview.getCreatedBy().equalsIgnoreCase(callerEmail))
+                    || (interview.getRecruiterEmail() != null && interview.getRecruiterEmail().equalsIgnoreCase(callerEmail));
+            if (!owns) {
+                throw new AccessDeniedException("You can only view or edit assessments you created or are assigned to.");
+            }
+            return;
+        }
+        // Any other authenticated role has no access to individual assessment records.
+        throw new AccessDeniedException("You do not have access to this assessment.");
     }
 
     private void applyFields(Interview interview, InterviewDTO dto) {
